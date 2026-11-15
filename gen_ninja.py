@@ -6,7 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent          # leopard-conhost/
 OUT  = ROOT / "out"
 
-SOURCES = ["main.c", "console_host.c", "console_lock.c"]
+SOURCES = ["main.c", "console_host.c",
+           "pty.c", "vt.c", "screen.c", "input.c", "x3tp_event.c",
+           "ime_client.c"]
 TARGET  = OUT / "leopard-conhost.elf"
 
 # XACT CRT（../XJ380-SDK/out/crt）：启动对象 + 静态运行时 + 分配器
@@ -20,7 +22,7 @@ CRT_LIBS = [LIB / "libxact.a", LIB / "liballoc.a"]
 # install/data 均为相对 / 的安装路径（无前导斜杠）
 PKG = {
     "pkgname": "leopard-conhost",
-    "pkgver":  "1.0_2",
+    "pkgver":  "1.0_3",
     "arch":    "x86_64",
     "desc":    "Leopard console host",
     "deps":    "",

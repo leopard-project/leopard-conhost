@@ -38,6 +38,9 @@ int console_lock_acquire(void)
         if (fd < 0) return -1;
 
         fill_addr(&addr);
+        /* A previous console host may have exited without removing the bound
+         * socket.  Remove the stale path before binding the new lock. */
+        (void)unlink(CONSOLE_SOCKET_PATH);
         if (bind(fd, (struct sockaddr *)&addr, console_addr_len(&addr)) != 0) {
                 close(fd);
                 return -1;
@@ -66,6 +69,7 @@ void console_lock_release(void)
 {
         if (g_lock_fd >= 0) {
                 close(g_lock_fd);
+                (void)unlink(CONSOLE_SOCKET_PATH);
                 g_lock_fd = -1;
         }
 }
