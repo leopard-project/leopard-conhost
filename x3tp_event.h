@@ -39,7 +39,7 @@ typedef struct x3tp_event {
 _Static_assert(sizeof(x3tp_event_t) == X3TP_EVENT_SIZE,
                "x3tp_event_t must stay 24 bytes (/dev/console read ABI)");
 
-/* Modifier bits, matching OpenXSKernel/include/x3tp.h exactly.  These
+/* Modifier bits, matching leopard-xsk/include/x3tp.h exactly.  These
  * are informational: text always arrives as X3TP_EVENT_CHAR, and conhost only
  * uses CTRL to detect the IME toggle chord. */
 #define X3TP_FLAG_SHIFT  (1u << 0)
@@ -52,7 +52,7 @@ _Static_assert(sizeof(x3tp_event_t) == X3TP_EVENT_SIZE,
 
 /* Key codes for X3TP_EVENT_KEYDOWN/KEYUP.
  *
- * Values 128..160 mirror OpenXSKernel/include/ps2/keyboard.h
+ * Values 128..160 mirror leopard-xsk/include/ps2/keyboard.h
  * (enum special_key_code), which is what X3TP producers emit for
  * non-text keys.  161..177 are a conhost-side keypad extension; the current kernel
  * has no keypad key codes (numeric keypad arrives as CHAR digits), so those

@@ -2,7 +2,7 @@
  * font8x16.h — 8x16 bitmap glyphs for the conhost framebuffer backend.
  *
  * Derived from the MikanOS hankaku font (Apache-2.0), verified copy at
- * OpenXSKernel/font/hankaku.bin.  Kept as a local table so the conhost has
+ * leopard-xsk/font/hankaku.bin.  Kept as a local table so the conhost has
  * no dependency on kernel symbols or the boot framebuffer configuration.
  */
 #pragma once

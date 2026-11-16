@@ -3,7 +3,7 @@
  *
  * /dev/fb0 is the primary output path.  The ioctl payloads are defined locally
  * because the XACT CRT header currently exposes only TIOCSWINSZ; these are the
- * stable Linux framebuffer ABI values and match OpenXSKernel/include/ioctl.h.
+ * stable Linux framebuffer ABI values and match leopard-xsk/include/ioctl.h.
  * If the device or mmap is unavailable, dirty rows are emitted as plain text
  * through xapi_Printf so the PTY + VT code can still be tested.
  */

@@ -14,7 +14,7 @@
 #include <unistd.h>
 
 /* The XACT CRT's xposix/sys/ioctl.h only exports TIOCSWINSZ today.  These are
- * stable Linux ioctl numbers and match OpenXSKernel/include/ioctl.h. */
+ * stable Linux ioctl numbers and match leopard-xsk/include/ioctl.h. */
 #ifndef TIOCSCTTY
 #define TIOCSCTTY 0x540e
 #endif
@@ -25,7 +25,7 @@
 #define ECHO 0000010
 #endif
 
-/* Matches OpenXSKernel/include/tty.h: struct termios. */
+/* Matches leopard-xsk/include/tty.h: struct termios. */
 struct pty_termios {
         uint32_t c_iflag;
         uint32_t c_oflag;

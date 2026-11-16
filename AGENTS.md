@@ -17,7 +17,7 @@ and execs this program with the shell path as argv[1].
   smaller buffers and `-EAGAIN` when empty.
 - Erase is a PTY input semantic, not a VT output command.  Unmodified
   `CHAR U+0008` (Backspace, future IME erase) is normalized to `0x7f` because
-  OpenXSKernel's canonical PTY uses `VERASE=0x7f`; Ctrl+H stays `0x08`.  See
+  leopard-xsk's canonical PTY uses `VERASE=0x7f`; Ctrl+H stays `0x08`.  See
   `docs/INPUT_ENCODING.md` before changing input encoding.
 - PTY master output is mirrored to serial through `xapi_OutputSerial()` for
   headless tests.  Password input stays invisible because the PTY suppresses

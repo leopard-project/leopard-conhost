@@ -122,7 +122,7 @@ size_t x3tp_event_encode(const struct vt *vt, const x3tp_event_t *event,
 
                 if (len == 0 || len > cap) return 0;
 
-                /* The PTY line discipline, not the VT, owns erase: OpenXSKernel
+                /* The PTY line discipline, not the VT, owns erase: leopard-xsk
                  * defaults canonical mode to VERASE=0x7f.  A Backspace key
                  * arrives as CHAR U+0008; forwarding a literal 0x08 would make
                  * the kernel insert it into the line buffer and echo it as ^H

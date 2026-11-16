@@ -1,7 +1,7 @@
 # Input encoding contract (X3TP CHAR/KEYDOWN -> PTY bytes)
 
 `/dev/console` delivers 24-byte `x3tp_event_t` records to conhost, which turns
-them into the byte stream written to the PTY master.  The PTY (OpenXSKernel
+them into the byte stream written to the PTY master.  The PTY (leopard-xsk
 `driver/fs/vfs/pty.cpp`) applies the line discipline; the VT layer only parses
 bytes that the slave writes back.  Erase therefore belongs to the **input side**
 of the PTY, not to the VT output stream.
