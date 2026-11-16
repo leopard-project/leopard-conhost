@@ -82,3 +82,11 @@ cc -std=c11 -Wall -Wextra -fsanitize=address,undefined -I. \
 ```
 
 安装位置：`/apps/leopard/leopard-conhost.elf`
+
+默认子进程是 `leopard-getty`；构建时可覆盖：
+
+```sh
+-DCONHOST_DEFAULT_CHILD='"/apps/system/shell/shell.elf"'
+```
+
+OpenXJ380 集成时用它直接启动 `/apps/system/shell/shell.elf`，也可以由启动器把 shell 路径作为 argv[1] 传入。

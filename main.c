@@ -9,7 +9,11 @@
 #include "libsys.h"
 #include "console_host.h"
 
-#define DEFAULT_CHILD "/apps/leopard/leopard-getty.elf"
+#ifndef CONHOST_DEFAULT_CHILD
+#define CONHOST_DEFAULT_CHILD "/apps/leopard/leopard-getty.elf"
+#endif
+
+#define DEFAULT_CHILD CONHOST_DEFAULT_CHILD
 
 int main(int argc, char *argv[], char *envp[])
 {
