@@ -12,16 +12,22 @@ and execs this program with the shell path as argv[1].
   `/dev/console` event boundary; `ime_client.c` is the fail-open manager client.
 - `/dev/fb0` (FBIOGET_FSCREENINFO/FBIOGET_VSCREENINFO + mmap) is the primary
   output backend.  If it is unavailable, dirty rows go through `xapi_Printf`.
-- `/dev/console` (`x3tp_event_t`, 24-byte records) is the primary keyboard
-  source.  Read must use a 24-byte multiple: the kernel returns `-EINVAL` for
+- `/dev/console` (`x3tp_event_t`, 24-byte records) is the keyboard source.
+  Read must use a 24-byte multiple: the kernel returns `-EINVAL` for
   smaller buffers and `-EAGAIN` when empty.
+- Erase is a PTY input semantic, not a VT output command.  Unmodified
+  `CHAR U+0008` (Backspace, future IME erase) is normalized to `0x7f` because
+  OpenXSKernel's canonical PTY uses `VERASE=0x7f`; Ctrl+H stays `0x08`.  See
+  `docs/INPUT_ENCODING.md` before changing input encoding.
+- PTY master output is mirrored to serial through `xapi_OutputSerial()` for
+  headless tests.  Password input stays invisible because the PTY suppresses
+  echo while `ECHO` is off.
 - On open, conhost flushes queued records until `-EAGAIN`.  Login
-  (`leopard-getty`) reads the legacy keyboard queue in parallel, so the input
+  (`leopard-getty`) reads the keyboard queue in parallel, so the input
   core ring still holds the typed username/password; without the flush the new
   shell would receive them as commands.
-- XTTTP output/input hooks remain only as a bring-up compatibility fallback for
-  apps that still use XAPI_PRINTF/XAPI_INPUT, and for `/dev/console` open/read
-  failure.  Do not make XAPI_INPUT the primary keyboard path or add a
+- This is a **pure PTY host**: `/dev/console` events go to the PTY, PTY output
+  goes to the VT/framebuffer.  All terminal I/O crosses the PTY.  Do not add a
   graphics.sys dependency.
 - No global focus policy here; Win32K (future) decides which window is active.
 - IME transport is a stdin/stdout **pipe pair**, not a socket.  conhost creates

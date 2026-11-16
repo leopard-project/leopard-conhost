@@ -21,10 +21,5 @@ int main(int argc, char *argv[], char *envp[])
         if (argc > 1 && argv[1] != NULL && argv[1][0] != '\0')
                 child = argv[1];
 
-        /* Keep the XTTTP sink registered for the legacy getch fallback.  The
-         * PTY path does not depend on this; it is only an input compatibility
-         * bridge until a kernel input endpoint exists. */
-        conhost_mark_terminal();
-
         return conhost_run_session(child, env);
 }

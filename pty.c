@@ -105,8 +105,8 @@ int pty_open_shell(pty_session_t *session, const char *shell,
                         _exit(126);
                 }
 
-                /* Do not leak the framebuffer, console-lock socket or master
-                 * into the shell.  dup2() already produced 0/1/2. */
+                /* Do not leak the framebuffer or PTY master into the shell.
+                 * dup2() already produced 0/1/2. */
                 for (fd = 3; fd < 64; fd++) {
                         if (fd != slave) close(fd);
                 }

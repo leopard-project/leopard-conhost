@@ -18,12 +18,6 @@ static const char *const input_candidates[] = {
         NULL,
 };
 
-static const char *const input_legacy_candidates[] = {
-        "/dev/input/seat0",
-        "/dev/seat0",
-        NULL,
-};
-
 static int path_uses_events(const char *path)
 {
         const char *format = getenv("CONHOST_INPUT_FORMAT");
@@ -48,7 +42,7 @@ static int input_open_path(input_source_t *input, const char *path)
 
         if (input->mode == INPUT_MODE_EVENTS) {
                 /* Flush events queued before this consumer existed.  Login
-                 * (leopard-getty) reads the legacy keyboard queue while the
+                 * (leopard-getty) reads the keyboard queue while the
                  * input core ring keeps a parallel copy, so without this the
                  * freshly started shell would receive the typed username and
                  * password as commands.  It also drops the password bytes that
@@ -82,27 +76,6 @@ int input_open(input_source_t *input)
         }
 
         input->fd = -1;
-        return -1;
-}
-
-int input_open_legacy(input_source_t *input)
-{
-        const char *env;
-        int         i;
-
-        if (input == NULL) return -1;
-        input->fd         = -1;
-        input->mode       = INPUT_MODE_BYTES;
-        input->eof        = 0;
-        input->staged_len = 0;
-
-        env = getenv("CONHOST_INPUT");
-        if (env != NULL && env[0] != '\0' && strcmp(env, "/dev/console") != 0) {
-                if (input_open_path(input, env) == 0) return 0;
-        }
-        for (i = 0; input_legacy_candidates[i] != NULL; i++) {
-                if (input_open_path(input, input_legacy_candidates[i]) == 0) return 0;
-        }
         return -1;
 }
 

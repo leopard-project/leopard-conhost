@@ -55,7 +55,30 @@ int main(void)
         expect(NULL, &event, "\x7f", 1);
         event.flags = 0;
 
-        /* Packed UTF-8: U+4F60 (你) = e4 bd a0, little-endian packing. */
+        /* Backspace/erase contract: canonical PTY mode uses VERASE=0x7f, so an
+         * unmodified CHAR U+0008 (Backspace, and future IME erase) must be
+         * normalized to 0x7f.  Ctrl+H and DEL stay as they are. */
+        event.value = 0x08;
+        expect(NULL, &event, "\x7f", 1);
+        event.flags = X3TP_FLAG_CTRL;
+        expect(NULL, &event, "\x08", 1);
+        event.flags = 0;
+        event.value = 0x7f;
+        expect(NULL, &event, "\x7f", 1);
+        event.flags = X3TP_FLAG_CTRL;
+        expect(NULL, &event, "\x7f", 1);
+        event.flags = 0;
+
+        /* The existing keycode and input_key paths also erase with 0x7f. */
+        event.type  = X3TP_EVENT_KEYDOWN;
+        event.value = 0x08;
+        expect(NULL, &event, "\x7f", 1);
+        key.kind = INPUT_KEY_BACKSPACE;
+        key.ch   = 0;
+        assert(input_encode_key(NULL, &key, out, sizeof(out)) == 1);
+        assert((unsigned char)out[0] == 0x7f);
+
+        /* Packed UTF-8: U+4F60 = e4 bd a0, little-endian packing. */
         event.value = 0x00a0bde4u;
         assert(x3tp_event_utf8(event.value, utf8) == 3);
         assert((unsigned char)utf8[0] == 0xe4);
@@ -131,6 +154,36 @@ int main(void)
         expect(NULL, &event, "", 0);
         event.value = 0x1b;
         expect(vt, &event, "\x1b", 1);
+
+        /* VT regression for the erase echo the PTY produces.
+         *
+         * Simple ECHOE form "\b \b": "abc" then erase -> "ab", cursor column 2.
+         * 0x7f itself is DEL/no-op on output; erase lives on the input side. */
+        vt_reset(vt);
+        vt_feed(vt, (const uint8_t *)"abc\b \b", 6);
+        assert(vt_cell(vt, 0, 0)->ch == 'a');
+        assert(vt_cell(vt, 0, 1)->ch == 'b');
+        assert(vt_cell(vt, 0, 2)->ch == ' ');
+        assert(vt_cursor_col(vt) == 2);
+        assert(vt_cursor_row(vt) == 0);
+
+        /* Control-char ECHOE form: a control byte echoed as two cells ("^H")
+         * is erased with 6 bytes "\b \b\b \b" and must still leave "ab" at
+         * cursor column 2. */
+        vt_reset(vt);
+        vt_feed(vt, (const uint8_t *)"ab^H", 4);
+        vt_feed(vt, (const uint8_t *)"\b \b\b \b", 6);
+        assert(vt_cell(vt, 0, 0)->ch == 'a');
+        assert(vt_cell(vt, 0, 1)->ch == 'b');
+        assert(vt_cell(vt, 0, 2)->ch == ' ');
+        assert(vt_cell(vt, 0, 3)->ch == ' ');
+        assert(vt_cursor_col(vt) == 2);
+
+        /* DEL on output is a no-op: it must not move the cursor or print. */
+        vt_reset(vt);
+        vt_feed(vt, (const uint8_t *)"ab\x7f", 3);
+        assert(vt_cell(vt, 0, 2)->ch == 0);
+        assert(vt_cursor_col(vt) == 2);
 
         /* Bounded fuzz: packed UTF-8 decoding must stay in bounds and never
          * produce more than four bytes. */

@@ -22,7 +22,7 @@ CRT_LIBS = [LIB / "libxact.a", LIB / "liballoc.a"]
 # install/data 均为相对 / 的安装路径（无前导斜杠）
 PKG = {
     "pkgname": "leopard-conhost",
-    "pkgver":  "1.0_3",
+    "pkgver":  "1.0_5",
     "arch":    "x86_64",
     "desc":    "Leopard console host",
     "deps":    "",

@@ -122,6 +122,22 @@ size_t x3tp_event_encode(const struct vt *vt, const x3tp_event_t *event,
 
                 if (len == 0 || len > cap) return 0;
 
+                /* The PTY line discipline, not the VT, owns erase: OpenXSKernel
+                 * defaults canonical mode to VERASE=0x7f.  A Backspace key
+                 * arrives as CHAR U+0008; forwarding a literal 0x08 would make
+                 * the kernel insert it into the line buffer and echo it as ^H
+                 * instead of backing the line up.  Normalize unmodified
+                 * Backspace (and a future IME "delete last char") to 0x7f.
+                 *
+                 * Ctrl+H is a real C0 control (0x08) and is preserved by the
+                 * CTRL remap below; a CHAR 0x7f (DEL) already stays 0x7f.  An
+                 * application that changes VERASE must use raw mode with its own
+                 * editor, or make its input method emit the expected erase byte;
+                 * conhost's default is 0x7f. */
+                if (!(event->flags & X3TP_FLAG_CTRL) && len == 1 &&
+                    (unsigned char)utf8[0] == 0x08)
+                        utf8[0] = 0x7f;
+
                 /* PS/2 reports Ctrl+letter as the letter plus a CTRL flag; the
                  * terminal byte stream needs the C0 control instead. */
                 if ((event->flags & X3TP_FLAG_CTRL) && len == 1) {

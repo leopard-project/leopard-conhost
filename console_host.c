@@ -1,5 +1,5 @@
 /*
- * console_host.c — PTY terminal host.
+ * console_host.c — pure PTY terminal host.
  *
  *   shell/app <-> /dev/pts/N <-> pty master <-> conhost <-> framebuffer
  *
@@ -7,10 +7,8 @@
  * master, feeds master bytes through the VT parser, renders dirty rows to the
  * framebuffer, and writes keyboard bytes back to the master.
  *
- * Primary keyboard source: /dev/console structured 24-byte x3tp_event_t
- * records.  The legacy XTTTP output buffer and XAPI_GETCH line editor remain
- * only as a fallback for apps that still use XAPI_INPUT/XAPI_PRINTF (notably
- * lpsh) and for kernels that do not expose /dev/console yet.
+ * Keyboard input is the /dev/console structured 24-byte x3tp_event_t stream.
+ * All terminal I/O crosses the PTY.
  */
 #include "console_host.h"
 
@@ -30,153 +28,7 @@
 #include "screen.h"
 #include "vt.h"
 
-#define LINE_CAP 256
 #define DIRECT_CAP 512
-
-typedef struct legacy_line {
-        char   buffer[LINE_CAP];
-        size_t length;
-} legacy_line_t;
-
-/* ---- XTTTP compatibility: output ------------------------------------- */
-
-static void legacy_drain_output(vt_t *vt)
-{
-        char output[1024];
-        int64_t read_rc;
-
-        read_rc = (int64_t)enter_syscall(SXAH_READ_OUTPUT_BUFFER,
-                                        (uint64_t)output, sizeof(output) - 1,
-                                        0, 0, 0, 0);
-        if (read_rc != 0) return;
-
-        output[sizeof(output) - 1] = '\0';
-        if (output[0] != '\0') {
-                /* XTTTP legacy output bypasses the PTY line discipline, so
-                 * OPOST/ONLCR never runs.  Normalize LF to CRLF here; fd-based
-                 * PTY output is already normalized by the slave termios and
-                 * does not pass through this path. */
-                char cooked[sizeof(output) * 2];
-                size_t in = 0, out = 0;
-                while (in < sizeof(output) && output[in] != '\0') {
-                        char ch = output[in++];
-                        if (ch == '\n' && (out == 0 || cooked[out - 1] != '\r'))
-                                cooked[out++] = '\r';
-                        cooked[out++] = ch;
-                        if (out + 2 >= sizeof(cooked)) break;
-                }
-                if (out != 0) vt_feed(vt, (const uint8_t *)cooked, out);
-        }
-        enter_syscall(SXAH_UNLOCK_OUTPUT_LOCK, 0, 0, 0, 0, 0, 0);
-}
-
-/* ---- XTTTP compatibility: line input --------------------------------- */
-
-static int legacy_input_status(void)
-{
-        return (int)enter_syscall(SXAH_CHECK_INPUT_BUFFER, 0, 0, 0, 0, 0, 0);
-}
-
-static void legacy_feed_line(const legacy_line_t *line)
-{
-        char buffer[LINE_CAP + 2];
-        size_t length = line->length;
-
-        if (length > LINE_CAP) length = LINE_CAP;
-        memcpy(buffer, line->buffer, length);
-        buffer[length] = '\n';
-        buffer[length + 1] = '\0';
-        enter_syscall(SXAH_WRITE_INPUT_BUFFER, (uint64_t)buffer, 0, 0, 0, 0, 0);
-}
-
-static void legacy_input_char(vt_t *vt, legacy_line_t *line, char ch, int no_echo)
-{
-        if (ch == '\n' || ch == '\r') {
-                static const char newline[] = "\r\n";
-                if (!no_echo) vt_feed(vt, (const uint8_t *)newline, 2);
-                legacy_feed_line(line);
-                line->length = 0;
-        } else if (ch == '\b' || ch == 127) {
-                static const char erase[] = "\b \b";
-                if (line->length > 0) {
-                        line->length--;
-                        if (!no_echo) vt_feed(vt, (const uint8_t *)erase, 3);
-                }
-        } else if ((unsigned char)ch >= 32 && (unsigned char)ch < 127) {
-                if (line->length < sizeof(line->buffer) - 1) {
-                        line->buffer[line->length++] = ch;
-                        if (!no_echo) vt_feed(vt, (const uint8_t *)&ch, 1);
-                }
-        }
-}
-
-/* Non-ASCII input is stored/echoed as raw UTF-8 bytes.  The legacy line
- * editor is byte-oriented, which is what XAPI_INPUT consumers expect. */
-static void legacy_input_utf8(vt_t *vt, legacy_line_t *line, const char *bytes,
-                              size_t len, int no_echo)
-{
-        size_t i;
-
-        for (i = 0; i < len; i++) {
-                if ((unsigned char)bytes[i] < 0x80) {
-                        legacy_input_char(vt, line, bytes[i], no_echo);
-                        continue;
-                }
-                if (line->length + 1 < sizeof(line->buffer)) {
-                        line->buffer[line->length++] = bytes[i];
-                        if (!no_echo) vt_feed(vt, (const uint8_t *)&bytes[i], 1);
-                }
-        }
-}
-
-static void legacy_input_bytes(vt_t *vt, legacy_line_t *line, int status,
-                               const char *bytes, size_t len)
-{
-        size_t i;
-        int    no_echo = (status & XTTTP_INPUT_STATUS_NO_ECHO) != 0;
-
-        for (i = 0; i < len; i++) legacy_input_char(vt, line, bytes[i], no_echo);
-}
-
-static void legacy_input_event(vt_t *vt, legacy_line_t *line, int status,
-                               const x3tp_event_t *event)
-{
-        int    no_echo = (status & XTTTP_INPUT_STATUS_NO_ECHO) != 0;
-        char   utf8[4];
-        size_t len;
-
-        if (event == NULL) return;
-
-        if (event->type == X3TP_EVENT_CHAR) {
-                len = x3tp_event_utf8(event->value, utf8);
-                if (len != 0) legacy_input_utf8(vt, line, utf8, len, no_echo);
-                return;
-        }
-        if (event->type != X3TP_EVENT_KEYDOWN) return;
-
-        switch (event->value) {
-        case X3TP_KEYCODE_ENTER:
-                legacy_input_char(vt, line, '\n', no_echo);
-                break;
-        case X3TP_KEYCODE_BACKSPACE:
-                legacy_input_char(vt, line, 127, no_echo);
-                break;
-        case X3TP_KEYCODE_TAB:
-                legacy_input_char(vt, line, '\t', no_echo);
-                break;
-        case X3TP_KEYCODE_SPACE:
-                legacy_input_char(vt, line, ' ', no_echo);
-                break;
-        default:
-                break;
-        }
-}
-
-static void legacy_input_pump(vt_t *vt, legacy_line_t *line, int status)
-{
-        char ch = xapi_Getch();
-        legacy_input_char(vt, line, ch, (status & XTTTP_INPUT_STATUS_NO_ECHO) != 0);
-}
 
 /* ---- IME routing ------------------------------------------------------ */
 
@@ -184,8 +36,6 @@ typedef struct route_ctx {
         pty_session_t *pty;
         vt_t          *vt;
         ime_client_t  *ime;
-        legacy_line_t *line;
-        int            legacy_status;
         int            ime_password;
         int            ctrl_down;
         char           direct[DIRECT_CAP];
@@ -211,11 +61,6 @@ static void route_direct(route_ctx_t *route, const char *bytes, size_t len)
                 memcpy(route->direct + route->direct_len, bytes, len);
                 route->direct_len += len;
         }
-}
-
-static int route_legacy_waiting(const route_ctx_t *route)
-{
-        return route->legacy_status & XTTTP_INPUT_STATUS_WAITING;
 }
 
 /* Only an ASCII letter can start a compose run in the builtin engine while
@@ -329,6 +174,43 @@ static void route_flush(route_ctx_t *route, uint64_t now_ms)
         }
 }
 
+/* ---- serial mirror ---------------------------------------------------- */
+
+/* Headless/debug observability.  conhost renders PTY output to the framebuffer,
+ * so QEMU serial logs (and the headless test suite that greps them) would
+ * otherwise never see getty/shell/installer text.  Mirror the same master bytes
+ * to the serial port; this is output-only, for diagnostics.
+ *
+ * xapi_OutputSerial() takes a NUL-terminated string and the kernel copies at
+ * most XAPI_USER_STRING_MAX (4096) bytes, so feed small NUL-terminated chunks.
+ * Embedded NULs are skipped (each printable run is emitted separately) instead
+ * of reading past the bytes actually returned by read().  Password input stays
+ * out of the log naturally: the PTY does not echo while ECHO is off, so no
+ * secret bytes ever reach the master. */
+static void serial_mirror(const char *data, size_t len)
+{
+        char   chunk[256];
+        size_t offset = 0;
+
+        while (offset < len) {
+                size_t amount = len - offset;
+                size_t start;
+                size_t i;
+
+                if (amount > sizeof(chunk) - 1) amount = sizeof(chunk) - 1;
+                memcpy(chunk, data + offset, amount);
+                chunk[amount] = '\0';
+
+                start = 0;
+                for (i = 0; i <= amount; i++) {
+                        if (i != amount && chunk[i] != '\0') continue;
+                        if (i > start) xapi_OutputSerial((WSTR)(chunk + start));
+                        start = i + 1;
+                }
+                offset += amount;
+        }
+}
+
 /* ---- main session ----------------------------------------------------- */
 
 static void build_environment(const char *shell, char *shell_var,
@@ -345,11 +227,6 @@ static void build_environment(const char *shell, char *shell_var,
         env[index] = NULL;
 }
 
-void conhost_mark_terminal(void)
-{
-        enter_syscall(SXAH_MARK_IS_TERMINAL, 0, 0, 0, 0, 0, 0);
-}
-
 int conhost_run_session(const char *shell, WSTR envp[])
 {
         screen_t       screen;
@@ -357,7 +234,6 @@ int conhost_run_session(const char *shell, WSTR envp[])
         input_source_t input;
         pty_session_t  pty;
         ime_client_t   ime;
-        legacy_line_t  line;
         route_ctx_t    route;
         char           shell_var[512];
         char          *env[5];
@@ -367,7 +243,6 @@ int conhost_run_session(const char *shell, WSTR envp[])
         int            eof_spins = 0;
 
         (void)envp;
-        memset(&line, 0, sizeof(line));
         memset(&route, 0, sizeof(route));
         input.fd = -1;
         ime_client_init(&ime);
@@ -409,7 +284,6 @@ int conhost_run_session(const char *shell, WSTR envp[])
                 int           nfds = 0;
                 int           poll_result;
                 int           input_index = -1;
-                int           legacy_status;
                 uint32_t      ime_context = IME_CTX_TERMINAL;
                 uint64_t      now_ms;
 
@@ -420,12 +294,8 @@ int conhost_run_session(const char *shell, WSTR envp[])
                 {
                         int no_echo = pty_no_echo(&pty);
 
-                        legacy_status = legacy_input_status();
-                        ime_context   = IME_CTX_TERMINAL;
-                        if (no_echo ||
-                            ((legacy_status & XTTTP_INPUT_STATUS_WAITING) != 0 &&
-                             (legacy_status & XTTTP_INPUT_STATUS_NO_ECHO) != 0))
-                                ime_context |= IME_CTX_PASSWORD;
+                        ime_context = IME_CTX_TERMINAL;
+                        if (no_echo) ime_context |= IME_CTX_PASSWORD;
                         ime_client_set_context(&ime, ime_context);
                 }
 
@@ -453,13 +323,13 @@ int conhost_run_session(const char *shell, WSTR envp[])
                 if (poll_result < 0 && errno != EINTR)
                         break;
 
-                now_ms        = ime_now_ms();
-                legacy_status = legacy_input_status();
+                now_ms = ime_now_ms();
 
                 if (poll_result > 0) {
                         if (fds[0].revents & (POLLIN | POLLHUP | POLLERR)) {
                                 ssize_t got = read(pty.master, master_buffer, sizeof(master_buffer));
                                 if (got > 0) {
+                                        serial_mirror(master_buffer, (size_t)got);
                                         vt_feed(vt, (const uint8_t *)master_buffer, (size_t)got);
                                 } else if (got == 0) {
                                         master_eof = 1;
@@ -478,53 +348,29 @@ int conhost_run_session(const char *shell, WSTR envp[])
                                         size_t        count;
                                         size_t        i;
 
-                                        route.pty           = &pty;
-                                        route.vt            = vt;
-                                        route.ime           = &ime;
-                                        route.line          = &line;
-                                        route.legacy_status = legacy_status;
-                                        route.ime_password   = (ime_context & IME_CTX_PASSWORD) != 0;
-                                        route.direct_len    = 0;
+                                        route.pty         = &pty;
+                                        route.vt          = vt;
+                                        route.ime         = &ime;
+                                        route.ime_password = (ime_context & IME_CTX_PASSWORD) != 0;
+                                        route.direct_len  = 0;
 
                                         do {
                                                 count = input_read_events(&input, events, batch);
-                                                for (i = 0; i < count; i++) {
-                                                        if (!child_done && route_legacy_waiting(&route))
-                                                                legacy_input_event(vt, &line,
-                                                                                   legacy_status,
-                                                                                   &events[i]);
-                                                        else
-                                                                route_event(&route, &events[i]);
-                                                }
+                                                for (i = 0; i < count; i++)
+                                                        route_event(&route, &events[i]);
                                         } while (count == batch);
 
-                                        if (!child_done && route_legacy_waiting(&route)) {
-                                                /* Legacy apps get no IME: the line
-                                                 * editor owns input while waiting. */
-                                                route.ctrl_down = 0;
-                                        } else {
-                                                route_flush(&route, now_ms);
-                                        }
+                                        route_flush(&route, now_ms);
 
                                         if (input.eof) {
                                                 input_close(&input);
-                                                if (input_open_legacy(&input) == 0)
-                                                        xapi_Printf("leopard-conhost: /dev/console read failed, using legacy input\n");
-                                                else
-                                                        xapi_Printf("leopard-conhost: /dev/console unavailable, using XTTTP input\n");
+                                                xapi_Printf("leopard-conhost: /dev/console closed\n");
                                         }
                                 } else {
                                         char keys[128];
                                         int  got = input_read(&input, keys, sizeof(keys));
                                         if (got > 0) {
-                                                if (!child_done &&
-                                                    (legacy_status & XTTTP_INPUT_STATUS_WAITING) != 0) {
-                                                        legacy_input_bytes(vt, &line,
-                                                                           legacy_status,
-                                                                           keys, (size_t)got);
-                                                } else {
-                                                        (void)pty_write(&pty, keys, (size_t)got);
-                                                }
+                                                (void)pty_write(&pty, keys, (size_t)got);
                                         } else if (got == 0) {
                                                 input_close(&input);
                                         }
@@ -535,17 +381,12 @@ int conhost_run_session(const char *shell, WSTR envp[])
                 /* IME pump runs even without readable input so deadlines and
                  * reconnects are serviced while the user is idle. */
                 {
-                        route.pty           = &pty;
-                        route.vt            = vt;
-                        route.ime           = &ime;
-                        route.line          = &line;
-                        route.legacy_status = legacy_status;
-                        route.ime_password  = (ime_context & IME_CTX_PASSWORD) != 0;
+                        route.pty         = &pty;
+                        route.vt          = vt;
+                        route.ime         = &ime;
+                        route.ime_password = (ime_context & IME_CTX_PASSWORD) != 0;
                         route_flush(&route, now_ms);
                 }
-
-                /* Legacy XAPI apps write into the XTTTP output buffer, not fd 1. */
-                legacy_drain_output(vt);
 
                 {
                         size_t      response_len = 0;
@@ -577,18 +418,6 @@ int conhost_run_session(const char *shell, WSTR envp[])
                 {
                         int child = pty_poll_child(&pty);
                         if (child != 0) child_done = 1;
-                }
-
-                /* No input endpoint: use the old XTTTP line editor only while
-                 * the app is explicitly waiting for XAPI input. */
-                if (!child_done && input_fd(&input) < 0) {
-                        if ((legacy_status & XTTTP_INPUT_STATUS_WAITING) != 0) {
-                                legacy_input_pump(vt, &line, legacy_status);
-                                screen_render(&screen, vt);
-                                vt_clear_dirty(vt);
-                        } else {
-                                line.length = 0;
-                        }
                 }
 
                 if (master_eof && !child_done) {

@@ -1,11 +1,11 @@
 /*
  * input.h — keyboard input boundary.
  *
- * The primary source is a future input endpoint/seat file descriptor.  Until
- * the kernel exposes one, conhost has no non-blocking PTY keyboard source; the
- * compatibility XTTTP/getch path stays in console_host.c and is only used when
- * this endpoint is absent.  Key encoding is centralised here so the endpoint
- * can later deliver structured events without touching the pty/vt code.
+ * The primary source is the /dev/console event endpoint (24-byte
+ * x3tp_event_t records).  A raw byte source (a seat device or an explicit
+ * $CONHOST_INPUT path) is still supported so non-event endpoints can be
+ * written straight to the PTY.  Key encoding is centralised here so the
+ * event boundary does not leak into the pty/vt code.
  */
 #pragma once
 
@@ -30,13 +30,10 @@ enum {
         INPUT_MODE_EVENTS = 1,
 };
 
-/* Try /dev/console first (structured records), then the legacy seat endpoints
- * or $CONHOST_INPUT (raw bytes).  Returns 0 when a source was opened, -1 when
- * the compatibility fallback should be used. */
+/* Try /dev/console first (structured records), then the seat endpoints or
+ * $CONHOST_INPUT (raw bytes).  Returns 0 when a source was opened, -1 when no
+ * keyboard source is available. */
 int  input_open(input_source_t *input);
-
-/* Re-open only the legacy byte endpoints after /dev/console read fails. */
-int  input_open_legacy(input_source_t *input);
 
 int  input_fd(const input_source_t *input);
 int  input_is_event_source(const input_source_t *input);
