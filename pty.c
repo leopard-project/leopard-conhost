@@ -2,6 +2,7 @@
  * pty.c — create a PTY pair and start the shell on the slave.
  */
 #include "pty.h"
+#include "xtuiapi.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -187,6 +188,13 @@ int pty_no_echo(pty_session_t *session)
         return (term.c_lflag & ECHO) == 0;
 }
 
+void pty_release_term_fd(pty_session_t *session)
+{
+        if (session == NULL || session->term_fd < 0) return;
+        close(session->term_fd);
+        session->term_fd = -1;
+}
+
 int pty_poll_child(pty_session_t *session)
 {
         int status = 0;
@@ -200,11 +208,13 @@ int pty_poll_child(pty_session_t *session)
         if (result == session->child) {
                 session->reaped = 1;
                 session->status = status;
+                pty_release_term_fd(session);
                 return 1;
         }
         if (result == 0) return 0;
         if (errno == ECHILD) {
                 session->reaped = 1;
+                pty_release_term_fd(session);
                 return 1;
         }
         return -1;

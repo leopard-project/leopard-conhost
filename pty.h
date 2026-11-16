@@ -36,5 +36,10 @@ int pty_no_echo(pty_session_t *session);
 /* Non-blocking child poll: 1 = exited, 0 = still running, -1 = error/ECHILD. */
 int pty_poll_child(pty_session_t *session);
 
+/* Drop the lazily opened slave fd used for TCGETS.  Must happen after the
+ * child exits so the last slave reference goes away and the master read can
+ * report EOF; otherwise conhost waits forever for master_eof. */
+void pty_release_term_fd(pty_session_t *session);
+
 /* Close the master.  The caller must have reaped or killed the child first. */
 void pty_close(pty_session_t *session);
